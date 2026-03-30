@@ -1,0 +1,133 @@
+clc; clear;
+%% Link lengths
+L1 = 0.196; L2 = 0.196; L3 = 0.410;
+psi1_0 = pi/12; % 15 degrees
+psi2_0 = pi/12; % 15 degrees
+psi3_0 = 5*pi/12; % 75 deg 
+psi4_0 = pi/3; % 60 deg 
+L4 = (L3 * sin(psi3_0)+ L1 * sin(psi1_0)) / sin(psi4_0);
+
+%% Time and Terrain
+amp = 0.055 ;
+dt = 0.01; t_end = 0.55 ;
+t = 0:dt:t_end;
+yC = amp * sin((2*pi - 0.6)*t); % wheel C terrain input # PITCH ANGLE PHI
+
+%% Initialize storage
+theta_vals = zeros(length(t), 4);
+yk_vals = zeros(size(t));
+yb_vals = zeros(size(t));
+yd_vals = zeros(size(t));
+ya_vals = zeros(size(t));
+phi_vals = zeros(size(t));
+
+%% Symbolic expressions
+syms th1 th2 th3 th4 phi_sym  real
+q_sym = [th1; th2; th3; th4];
+% Forward kinematics
+xk = L1*cos(th1);        yk = L1*sin(th1);
+xb = xk + L2*cos(th1+th2); yb = yk + L2*sin(th1+th2);
+xd = xk + L3*cos(th1+th2+th3); yd = yk + L3*sin(th1+th2+th3);
+xc = xd + L4*cos(th1+th2+th3+th4); yc = yd + L4*sin(th1+th2+th3+th4);
+
+% Jacobians
+Jd = [jacobian(xd, q_sym); jacobian(yd, q_sym)];
+Jk = [jacobian(xk, q_sym); jacobian(yk, q_sym)];
+
+% Functions
+vd_func = matlabFunction(Jd, 'Vars', {th1, th2, th3, th4});
+vk_func = matlabFunction(Jk, 'Vars', {th1, th2, th3, th4});
+
+%% Simulation loop using constrained model
+for i = 1:length(t)
+    yC_i = yC(i);
+
+    % Define constraint equation to solve for eps
+    constraint_eq = yC_i - L1 * sin(psi1_0) == ...
+                    - L4 * sin(psi4_0 - phi_sym) + L3 * sin(psi3_0 + phi_sym);
+
+    % Solve for eps numerically using vpasolve with a reasonable guess
+    phi_sol = vpasolve(constraint_eq, phi_sym, 0);  % Initial guess = 0
+    if isempty(phi_sol) || ~isfinite(double(phi_sol))
+        warning("Skipping at t=%.3f due to bad eps solution", t(i));
+        phi_val = 0;
+    else
+        phi_val = double(phi_sol);
+    end
+    phi_vals(i) = phi_val;
+    % Update psi values according to constrained model
+    psi1_new = psi1_0 ; %constant
+    psi2_new = psi2_0 ;%constant when C rises
+    psi3_new = psi3_0 + phi_val ; 
+    psi4_new = psi4_0 - phi_val ; 
+    
+    % Compute joint angles from constrained model
+    theta1 = psi1_new;                    % θ1 = ψ1_new
+    theta2 = -psi1_new - psi2_new;        % θ2 = -ψ1 - ψ2
+    theta3 = psi3_new + psi2_new ;     
+    theta4 = -(psi3_new + psi4_new);              
+    
+    % Store joint angles
+    theta_vals(i,:) = [theta1, theta2, theta3, theta4];
+    
+    % Forward kinematics using constrained model equations 
+    ya = 0 ; 
+    yk = ya + L1*sin(theta1);
+    yb = yk + L2*sin(theta1 + theta2);
+    yd = yk + L3*sin(theta1 + theta2 + theta3);
+    
+    % Store positions
+    yk_vals(i) = yk;
+    yb_vals(i) = yb;
+    yd_vals(i) = yd;
+    ya_vals(i) = ya;
+
+end
+
+figure;
+plot(t, yC , 'm', 'LineWidth', 2);
+xlabel('Time (s)');
+ylabel('y_C');
+title('yC');
+grid on;
+
+% Relative vertical displacement of D
+yD_rel = abs(yd_vals - yd_vals(1)) ;  % subtract initial height of D
+figure;
+plot(t, yD_rel, 'm', 'LineWidth', 2);
+xlabel('Time (s)');
+ylabel('\Delta y_D (m)');
+title('Vertical Displacement of Point D (relative to initial)');
+grid on;
+xlim([0,0.53]);
+figure;
+plot(t, yb_vals , 'm', 'LineWidth', 2);
+xlabel('Time (s)');
+ylabel('y_B');
+title('yB');
+grid on;
+
+% Compute derivative of pitch angle phi using central difference
+phi_dot = zeros(size(phi_vals));
+phi_dot(2:end-1) = (phi_vals(3:end) - phi_vals(1:end-2)) / (2*dt);
+
+% Smooth ends using forward/backward difference
+phi_dot(1) = (phi_vals(2) - phi_vals(1)) / dt;
+phi_dot(end) = (phi_vals(end) - phi_vals(end-1)) / dt;
+
+figure;
+plot(t, phi_dot * 180/pi, 'r--', 'LineWidth', 2);
+ylabel('d\phi/dt [deg/s]');
+xlabel('Time (s)');
+title('Pitch Angle rate');
+legend('d\phi/dt');
+grid on;
+
+figure;
+plot(t, phi_vals * 180/pi, 'r--', 'LineWidth', 2);  % Convert to deg/s if needed
+ylabel('\phi [deg]');
+xlabel('Time (s)');
+title('Pitch Angle');
+legend('\phi');
+grid on;
+
