@@ -1,0 +1,68 @@
+%% Load the ADAMS data from .tab file
+adams_data_1 = readmatrix('RB_point_A_y_csv.tab', 'FileType', 'text', 'Delimiter', '\t');
+adams_data_2 = readmatrix('RB_point_D_y_csv.tab', 'FileType', 'text', 'Delimiter', '\t');
+adams_data_3 = readmatrix('Pitch_Wheel_A_rise.tab', 'FileType', 'text', 'Delimiter', '\t');
+
+Y_adams_1 = adams_data_1(:, 2);  % Y position from first CSV (point A)
+Y_adams_2 = adams_data_2(:, 2);  % Y position from second CSV (point D)
+Y_adams_3 = adams_data_3(:, 2);
+T = adams_data_1(:, 1);          % Time vector
+T_3 = adams_data_3(:, 1);
+[~, idx_ref] = min(abs(T - 2));
+
+Y_rel_1 = abs(Y_adams_1 - Y_adams_1(idx_ref));
+% Plot
+figure;
+plot(T, Y_rel_1/1000 , 'LineWidth', 1.5);
+xlabel('Time [s]');
+ylabel('Y_A');
+title('Wheel A displacement(Adams)');
+grid on;
+xlim([2, 3.3]);  % Set x-axis limits
+
+Y_rel_2 =  abs(Y_adams_2 - Y_adams_2(idx_ref));
+% Plot
+figure;
+plot(T, Y_rel_2/1000 , 'LineWidth', 1.5);
+xlabel('Time [s]');
+ylabel('Y_D from Adams');
+title(' Point D displacement(Adams)');
+grid on;
+xlim([2, 3.3]);  % Set x-axis limits
+ylim([-0.025,0.02])
+
+% Plot
+figure;
+plot(T_3, Y_adams_3 , 'LineWidth', 1.5);
+xlabel('Time [s]');
+ylabel('Pitch rate');
+grid on;
+xlim([2.88 , 3.3]);  % Set x-axis limits
+
+
+adams_data_4 = readmatrix('Point_D_wheel_C.tab', 'FileType', 'text', 'Delimiter', '\t');
+adams_data_5 = readmatrix('Pitch_Wheel_C_rise.tab', 'FileType', 'text', 'Delimiter', '\t');
+Y_adams_3 = adams_data_4(:, 2);  % Y position from first CSV (point A)
+Y_adams_4 = adams_data_5(:, 2);  % Y position from second CSV (point D)
+Y_rel_3 =  abs(Y_adams_3 - Y_adams_3(idx_ref));
+T_4 = adams_data_4(:, 1);
+[~, idx_ref_2] = min(abs(T_4 - 2));
+Y_rel_3 =  abs(Y_adams_3 - Y_adams_3(idx_ref_2));
+% Plot
+figure;
+plot(T_4, Y_rel_3/1000 , 'LineWidth', 1.5);
+xlabel('Time [s]');
+ylabel('Y_D');
+title(' Point D displacement(Adams) for Case 2');
+grid on;
+xlim([2.6, 2.97]);  % Set x-axis limits
+
+
+T_5 = adams_data_5(:, 1);
+figure;
+plot(T_5, Y_adams_4 , 'LineWidth', 1.5);
+xlabel('Time [s]');
+ylabel('Pitch rate (deg/s)');
+title(' Pitch rate for Case 2');
+grid on;
+xlim([1.6,2]);
