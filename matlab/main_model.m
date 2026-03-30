@@ -1,0 +1,194 @@
+clc; clear;
+%% Link lengths
+L1 = 0.196; L2 = 0.196; L3 = 0.410;
+psi1_0 = pi/12; % 15 degrees
+psi2_0 = pi/12; % 15 degrees
+psi3_0 = 5*pi/12; % 60 deg 
+psi4_0 = pi/3; % 40 deg 
+L4 = (L3 * sin(psi3_0)+ L1 * sin(psi1_0)) / sin(psi4_0);
+
+%% Time and Terrain
+amp = 0.054 ;
+dt = 0.01; t_end = 0.6 ;
+t = 0:dt:t_end;
+yA = amp * sin((2*pi - 0.6)*t); % wheel A terrain input
+
+%% Initialize storage
+theta_vals = zeros(length(t), 4);
+yk_vals = zeros(size(t));
+yb_vals = zeros(size(t));
+yd_vals = zeros(size(t));
+yc_vals = zeros(size(t));
+alpha_vals = zeros(size(t));
+eps_vals = zeros(size(t));
+
+%% Symbolic expressions
+syms th1 th2 th3 th4 eps_sym  real
+q_sym = [th1; th2; th3; th4];
+% Forward kinematics
+xk = L1*cos(th1);        yk = L1*sin(th1);
+xb = xk + L2*cos(th1+th2); yb = yk + L2*sin(th1+th2);
+xd = xk + L3*cos(th1+th2+th3); yd = yk + L3*sin(th1+th2+th3);
+xc = xd + L4*cos(th1+th2+th3+th4); yc = yd + L4*sin(th1+th2+th3+th4);
+
+% Jacobians
+Jd = [jacobian(xd, q_sym); jacobian(yd, q_sym)];
+Jk = [jacobian(xk, q_sym); jacobian(yk, q_sym)];
+
+% Functions
+vd_func = matlabFunction(Jd, 'Vars', {th1, th2, th3, th4});
+vk_func = matlabFunction(Jk, 'Vars', {th1, th2, th3, th4});
+
+%% Simulation loop using constrained model
+for i = 1:length(t)
+    yA_i = yA(i);
+    
+    % Compute alpha using the constrained model formula
+    alpha = asin(yA_i / (2 * L1 * cos(psi1_0)));
+    alpha_vals(i) = alpha;
+    % Define constraint equation to solve for eps
+    constraint_eq = yA_i + L1 * sin(psi1_0 - alpha) == ...
+                    L4 * sin(psi4_0 + eps_sym) - L3 * sin(psi3_0 - eps_sym);
+
+    % Solve for eps numerically using vpasolve with a reasonable guess
+    eps_sol = vpasolve(constraint_eq, eps_sym, 0);  % Initial guess = 0
+    if isempty(eps_sol) || ~isfinite(double(eps_sol))
+        warning("Skipping at t=%.3f due to bad eps solution", t(i));
+        eps_val = 0;
+    else
+        eps_val = double(eps_sol);
+    end
+    eps_vals(i) = eps_val;  % Store pitch angle at each timestep
+    % Update psi values according to constrained model
+    psi1_new = psi1_0 - alpha;
+    psi2_new = psi2_0 + alpha;
+    psi3_new = psi3_0 - eps_val ; 
+    psi4_new = psi4_0 + eps_val ; 
+    
+    % Compute joint angles from constrained model
+    theta1 = psi1_new;                    % θ1 = ψ1_new
+    theta2 = -psi1_new - psi2_new;        % θ2 = -ψ1 - ψ2
+    theta3 = psi3_new + psi2_new ;     
+    theta4 = -(psi3_new + psi4_new);              
+    
+    % Store joint angles
+    theta_vals(i,:) = [theta1, theta2, theta3, theta4];
+    
+    % Forward kinematics using constrained model equations
+    yk = yA_i + L1*sin(theta1);
+    yb = yk + L2*sin(theta1 + theta2);
+    yd = yk + L3*sin(theta1 + theta2 + theta3);
+    yc = yd + L4*sin(theta1 + theta2 + theta3 + theta4);
+    
+    % Store positions
+    yk_vals(i) = yk;
+    yb_vals(i) = yb;
+    yd_vals(i) = yd;
+    yc_vals(i) = yc;
+
+end
+
+
+figure;
+plot(t, yc_vals , 'm', 'LineWidth', 2);
+xlabel('Time (s)');
+ylabel('y_C');
+title('yC');
+grid on;
+ylim([-0.5,0.5]);
+
+
+% Relative vertical displacement of D
+yD_rel = abs(yd_vals - yd_vals(1)) ;  % subtract initial height of D
+figure;
+plot(t, yD_rel, 'm', 'LineWidth', 2);
+xlabel('Time (s)');
+ylabel('\Delta y_D (m)');
+title('Vertical Displacement of Point D (relative to initial)');
+grid on;
+xlim([0,0.33]);
+ylim([0,0.02]);
+
+% Compute transmissibility
+%eps_thresh = 1e-4;  % threshold to avoid division by near-zero
+%transmissibility = zeros(size(t));
+
+%for i = 1:length(t)
+  %  if abs(yA(i)) > eps_thresh
+   %     transmissibility(i) = abs(yD_rel(i) / yA(i));
+   % else
+    %    transmissibility(i) = 0;  % or NaN if you prefer skipping
+   % end
+%end
+
+%% Velocity computation
+theta_dot_vals = gradient(theta_vals, dt);
+
+% vD_y and vK_y
+vDy = zeros(size(t));
+vKy = zeros(size(t));
+
+for i = 1:length(t)
+    q_i = theta_vals(i,:);
+    dq_i = theta_dot_vals(i,:);
+    
+    Jd_i = vd_func(q_i(1), q_i(2), q_i(3), q_i(4));
+    Jk_i = vk_func(q_i(1), q_i(2), q_i(3), q_i(4));
+    
+    vD = [1; 0] + Jd_i * dq_i(:);
+    vDy(i) = vD(2);
+end
+
+figure;
+plot(t, yA , 'm', 'LineWidth', 2);
+xlabel('Time (s)');
+ylabel('y_A');
+title('yA');
+grid on;
+ylim([0,0.07])
+xlim([0,0.4])
+
+%RATE OF ALPHA
+alpha_dot = zeros(size(alpha_vals));
+alpha_dot(2:end-1) = (alpha_vals(3:end) - alpha_vals(1:end-2)) / (2*dt);
+alpha_dot(1) = (alpha_vals(2) - alpha_vals(1)) / dt;
+alpha_dot(end) = (alpha_vals(end) - alpha_vals(end-1)) / dt;
+
+
+% Compute derivative of pitch angle epsilon using central difference
+eps_dot = zeros(size(eps_vals));
+eps_dot(2:end-1) = (eps_vals(3:end) - eps_vals(1:end-2)) / (2*dt);
+
+% Forward/backward difference for edges
+eps_dot(1) = (eps_vals(2) - eps_vals(1)) / dt;
+eps_dot(end) = (eps_vals(end) - eps_vals(end-1)) / dt;
+
+figure;
+plot(t, -eps_dot * 180/pi, 'r--', 'LineWidth', 2);  % Convert to deg/s if needed
+ylabel('d\epsilon/dt [deg/s]');
+xlabel('Time (s)');
+title('Pitch Angle Rate (ε̇)');
+legend('d\epsilon/dt');
+grid on;
+
+
+figure;
+plot(t, yA , 'm', 'LineWidth', 2);
+xlabel('Time (s)');
+ylabel('y_A');
+title('yA');
+grid on;
+xlim([0,0.7]);
+
+
+[~, idx] = min(abs(t - 0.55));
+disp(yA(idx));
+
+figure;
+plot(t, - eps_vals * 180/pi, 'r--', 'LineWidth', 2);  % Convert to deg/s if needed
+ylabel('\epsilon [deg]');
+xlabel('Time (s)');
+title('Pitch Angle  (ε̇)');
+legend('\epsilon');
+grid on;
+
